@@ -1,0 +1,292 @@
+---
+- name: add k8s apt-key
+  apt_key:
+    url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+    state: present
+
+- name: add k8s apt repository
+  apt_repository:
+    repo: 'deb https://apt.kubernetes.io/ kubernetes-xenial main'
+    state: present
+    filename: kubernetes
+    update_cache: yes
+
+- name: apt install tools
+  apt:
+    name: "{{ item }}"
+    update_cache: yes
+    cache_valid_time: 3600
+  with_items:
+    - apt-transport-https
+    - curl
+    - vim
+    - jq
+
+- name: apt install k8s
+  apt:
+    name: "{{ item }}"
+    update_cache: yes
+    cache_valid_time: 3600
+  with_items:
+    - kubelet
+    - kubeadm
+    - kubectl
+    - docker-ce
+
+- name: hold packages
+  dpkg_selections:
+    name: "{{ item }}"
+    selection: hold
+  with_items:
+    - kubelet
+    - kubeadm
+    - kubectl
+    - docker-ce
+
+- name: add kernel parameters and reload
+  sysctl:
+    name: "{{ item.name }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: yes
+    ignoreerrors: yes
+    sysctl_file: /etc/sysctl.d/k8s.conf
+  with_items:
+    - name: net.bridge.bridge-nf-call-ip6tables
+      value: 1
+    - name: net.bridge.bridge-nf-call-iptables
+      value: 1
+    - name: net.ipv4.ip_forward
+      value: 1
+
+- name: systemd start　docker
+  systemd:
+    name: docker
+    state: started
+
+- name: add modules
+  modprobe:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - ip_vs_rr
+    - ip_vs_wrr
+    - ip_vs_sh
+    - ip_vs
+
+- name: Remove swapfile from /etc/fstab
+  mount:
+    name: swap
+    fstype: swap
+    state: absent
+
+- name: Disable swap
+  command: swapoff -a
+  when: ansible_swaptotal_mb > 0
+
+# virtualboxの場合はインターフェースの
+- block:
+  - name: get ipv4 address
+    command: bash -c "/sbin/ip -f inet -o addr show | grep {{ kubernetes_virtualbox_network }}　| awk \{'print $4'\} | cut -d/ -f 1"
+    register: get_ipv4_address
+    check_mode: no
+    changed_when: false
+
+  - name: put /etc/default/kubelet
+    template:
+      src: kubelet
+      dest: /etc/default/kubelet
+      owner: root
+      group: root
+      mode: 0644
+    when: get_ipv4_address
+    notify: restart kubelet
+  when: kubernetes_virtualbox_flag
+
+# masterノードの場合の処理
+- block:
+  - name: get ipv4 address
+    command: bash -c "/sbin/ip -f inet -o addr show | grep {{ kubernetes_master_network }} | awk \{'print $4'\} | cut -d/ -f 1"
+    register: get_ipv4_address
+    check_mode: no
+    changed_when: false
+
+  # kubeadm initの実行 VirtualBox で　Flannelの場合
+  - name: kubernetes init VirtualBox Flannel
+    shell: "bash -lc 'kubeadm init --apiserver-advertise-address={{ get_ipv4_address.stdout }} --apiserver-cert-extra-sans={{ get_ipv4_address.stdout }} --node-name {{ kubernetes_hostname }} --pod-network-cidr={{ kubernetes_flannel_pod_network_cidr }}'"
+    register: kubernetes_init_register
+    check_mode: no
+    changed_when: false
+    when:
+      - kubernetes_flannel_flag
+      - kubernetes_virtualbox_flag
+    ignore_errors: yes
+
+  # kubeadm initの実行 VirtualBox で　Calicoの場合
+  - name: kubernetes init VirtualBox Calico
+    shell: "bash -lc 'kubeadm init --apiserver-advertise-address={{ get_ipv4_address.stdout }} --apiserver-cert-extra-sans={{ get_ipv4_address.stdout }} --node-name {{ kubernetes_hostname }} --pod-network-cidr={{ kubernetes_calico_pod_network_cidr }}'"
+    register: kubernetes_init_register
+    check_mode: no
+    changed_when: false
+    when:
+      - kubernetes_calico_flag
+      - kubernetes_virtualbox_flag
+    ignore_errors: yes
+
+    # kubeadm initの実行 Flannelの場合
+  - name: kubernetes init Flannel
+    shell: "bash -lc 'kubeadm init --node-name {{ kubernetes_hostname }} --pod-network-cidr={{ kubernetes_flannel_pod_network_cidr }}'"
+    register: kubernetes_init_register
+    check_mode: no
+    changed_when: false
+    when:
+      - kubernetes_flannel_flag
+      - not kubernetes_virtualbox_flag
+    ignore_errors: yes
+
+    # kubeadm initの実行　Calicoの場合
+  - name: kubernetes init Calico
+    shell: "bash -lc 'kubeadm init --node-name {{ kubernetes_hostname }} --pod-network-cidr={{ kubernetes_calico_pod_network_cidr }}'"
+    register: kubernetes_init_register
+    check_mode: no
+    changed_when: false
+    when:
+      - kubernetes_calico_flag
+      - not kubernetes_virtualbox_flag
+    ignore_errors: yes
+
+  # rootユーザーがkubectlを実行できるようにする
+  - name: "create directory /root/.kube"
+    file:
+      path: "/root/.kube"
+      owner: root
+      group: root
+      mode: 0755
+      state: directory
+
+  - name: Allow root users to use kubectl /etc/kubernetes/admin.conf copy
+    copy:
+      src: /etc/kubernetes/admin.conf
+      dest: "/root/.kube/config"
+      remote_src: true
+      owner: root
+      group: root
+
+  # 指定ユーザーがkubectlを実行できるようにする
+  - name: "create directory /home/{{ item }}/.kube"
+    file:
+      path: "/home/{{ item }}/.kube"
+      owner: "{{ item }}"
+      group: "{{ item }}"
+      mode: 0755
+      state: directory
+    with_items:
+      - "{{ kubernetes_execute_users }}"
+
+  - name: Allow users to use kubectl /etc/kubernetes/admin.conf copy
+    copy:
+      src: /etc/kubernetes/admin.conf
+      dest: "/home/{{ item }}/.kube/config"
+      remote_src: true
+      owner: "{{ item }}"
+      group: "{{ item }}"
+    with_items:
+      - "{{ kubernetes_execute_users }}"
+
+    # Flannelのインストール
+  - name: Download the Flannel yaml
+    get_url:
+      url: "https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml"
+      dest: "/usr/local/src/kube-flannel.yml"
+
+  - name: "virtualBox等の場合にyamlを書き換える"
+    replace:
+      dest: /usr/local/src/kube-flannel.yml
+      regexp: '/opt/bin/flanneld'
+      replace: '[ "/opt/bin/flanneld", "--ip-masq", "--kube-subnet-mgr", "--iface=enp0s8" ]'
+    when:
+      - kubernetes_flannel_flag
+      - kubernetes_virtualbox_flag
+
+  - name: kubernetes install Flannel
+    shell: "kubectl apply -f /usr/local/src/kube-flannel.yml"
+    register: kubernetes_flannel_install_register
+    check_mode: no
+    changed_when: false
+    when:
+      - kubernetes_flannel_flag
+    environment:
+      KUBECONFIG: /etc/kubernetes/kubelet.conf
+
+  - name: delete Flannel yaml
+    file:
+      path: "/usr/local/src/kube-flannel.yml"
+      state: absent
+
+  # Calicoのインストール
+  - name: kubernetes install Calico
+    shell: |
+      kubectl apply -f https://docs.projectcalico.org/v3.3/getting-started/kubernetes/installation/hosted/rbac-kdd.yaml
+      kubectl apply -f https://docs.projectcalico.org/v3.3/getting-started/kubernetes/installation/hosted/kubernetes-datastore/calico-networking/1.7/calico.yaml
+    register: kubernetes_calico_install_register
+    check_mode: no
+    changed_when: false
+    when: kubernetes_calico_flag
+    environment:
+      KUBECONFIG: /etc/kubernetes/admin.conf
+
+  # helm
+  - name: get helm download
+    get_url:
+      url: "{{ kubernetes_helm_download_url }}"
+      dest: /usr/local/src/
+      sha256sum: "{{ kubernetes_helm_sha256sum }}"
+
+  - name: "create directory /usr/local/src/helm"
+    file:
+      path: "/usr/local/src/helm"
+      owner: root
+      group: root
+      mode: 0755
+      state: directory
+
+  # ダウンロードファイルを解凍する
+  - name: unarchive the helm download file
+    unarchive:
+      src: "/usr/local/src/helm-v{{ kubernetes_helm_version }}-linux-amd64.tar.gz"
+      dest: /usr/local/src/helm
+      remote_src: yes
+
+  - name: "copy helm"
+    shell: "cp -rp helm /usr/local/bin/"
+    args:
+      chdir: "/usr/local/src/helm/linux-amd64"
+
+  # kubens/kubectx
+  - name: git clone kubens/kubectx
+    git:
+      repo: https://github.com/ahmetb/kubectx.git
+      dest: /usr/local/kubectx
+
+  - name: create link to kubectx
+    file:
+      src: /usr/local/kubectx/kubectx
+      dest: /usr/local/bin/kubectx
+      state: link
+
+  - name: create link to kubens
+    file:
+      src: /usr/local/kubectx/kubens
+      dest: /usr/local/bin/kubens
+      state: link
+
+  # Masterノードにもデプロイしたい場合の対応
+  - name: kubernetes set master deploy set
+    shell: "bash -lc 'kubectl taint nodes {{ kubernetes_hostname }} node-role.kubernetes.io/master:NoSchedule-'"
+    check_mode: no
+    changed_when: false
+    when:
+      - kubernetes_master_deploy_flag
+    ignore_errors: yes
+
+  when: kubernetes_master_flag

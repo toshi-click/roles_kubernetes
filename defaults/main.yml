@@ -1,4 +1,8 @@
 ---
+# apiにproxyがあるかのフラグ
+kubernetes_api_proxy_flag: false
+# kubernetesのapiサーバー名
+kubernetes_api_name: exmple.com
 # masterノードかどうかのフラグ
 kubernetes_master_flag: false
 # masterノードにもデプロイしたい場合はtrueにする
@@ -12,16 +16,12 @@ kubernetes_virtualbox_network: 192.168
 
 kubernetes_hostname: localhost.localdomain
 
-kubernetes_flannel_flag: true
-kubernetes_flannel_pod_network_cidr: 10.244.0.0/16
-
-kubernetes_calico_flag: false
-kubernetes_calico_pod_network_cidr: 192.168.0.0/16
+kubernetes_pod_network_cidr: 10.244.0.0/16
 
 kubernetes_execute_users:
   - toshi
 
 # https://github.com/helm/helm/releases
-kubernetes_helm_version: 3.0.0
+kubernetes_helm_version: 3.2.4
 kubernetes_helm_download_url: https://get.helm.sh/helm-v{{ kubernetes_helm_version }}-linux-amd64.tar.gz
-kubernetes_helm_sha256sum: 10e1fdcca263062b1d7b2cb93a924be1ef3dd6c381263d8151dd1a20a3d8c0dc
+kubernetes_helm_sha256sum: 3087b8d7adf7a8310d2840a72194c79d0e89f11ae2a14118368eb91abf8ad078

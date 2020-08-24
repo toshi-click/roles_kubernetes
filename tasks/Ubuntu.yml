@@ -13,25 +13,27 @@
 
 - name: apt install tools
   apt:
-    name: "{{ item }}"
+    name: "{{ packages }}"
     update_cache: yes
     cache_valid_time: 3600
-  with_items:
-    - apt-transport-https
-    - curl
-    - vim
-    - jq
+  vars:
+    packages:
+      - apt-transport-https
+      - curl
+      - vim
+      - jq
 
 - name: apt install k8s
   apt:
-    name: "{{ item }}"
+    name: "{{ packages }}"
     update_cache: yes
     cache_valid_time: 3600
-  with_items:
-    - kubelet
-    - kubeadm
-    - kubectl
-    - docker-ce
+  vars:
+    packages:
+      - kubelet
+      - kubeadm
+      - kubectl
+      - docker-ce
 
 - name: hold packages
   dpkg_selections:
@@ -112,13 +114,29 @@
       check_mode: no
       changed_when: false
 
-    - name: put /tmp/kubeadm-config.yml
-      template:
-        src: kubeadm-config.yml
-        dest: /tmp/kubeadm-config.yml
-        owner: root
-        group: root
-        mode: 0644
+    # kubernetesのインストールを確認する
+    - name: Confirm installation of kubernetes
+      stat:
+        path: "/etc/kubernetes/admin.conf"
+      register: kubernetes_state
+
+    - block:
+        - name: put /tmp/kubeadm-config.yml
+          template:
+            src: kubeadm-config.yml
+            dest: /tmp/kubeadm-config.yml
+            owner: root
+            group: root
+            mode: 0644
+
+        # kubeadm initの実行
+        - name: kubeadm init
+          shell: "bash -lc 'kubeadm init --ignore-preflight-errors  Swap --config /tmp/kubeadm-config.yml'"
+          register: kubernetes_init_register
+          check_mode: no
+          changed_when: false
+
+      when: not kubernetes_state.stat.exists
 
     # rootユーザーがkubectlを実行できるようにする
     - name: "create directory /root/.kube"

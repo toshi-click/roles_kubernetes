@@ -1,32 +1,10 @@
 apiVersion: kubeadm.k8s.io/v1beta2
-kind: InitConfiguration
-localAPIEndpoint:
-  advertiseAddress: "{{ get_ipv4_address.stdout }}"
-  bindPort: 6443
-nodeRegistration:
-  criSocket: /var/run/dockershim.sock
-  name: {{ kubernetes_hostname }}
-  taints:
-    - effect: NoSchedule
-      key: node-role.kubernetes.io/master
----
+kind: ClusterConfiguration
+kubernetesVersion: stable
 apiServer:
   certSANs:
     - {{ kubernetes_api_name }}
   timeoutForControlPlane: 4m0s
-apiVersion: kubeadm.k8s.io/v1beta2
-certificatesDir: /etc/kubernetes/pki
-clusterName: kubernetes
 controlPlaneEndpoint: {{ kubernetes_api_name }}:6443
-controllerManager: {}
-dns:
-  type: CoreDNS
-etcd:
-  local:
-    dataDir: /var/lib/etcd
-imageRepository: k8s.gcr.io
-kind: ClusterConfiguration
 networking:
-  dnsDomain: cluster.local
   podSubnet: {{ kubernetes_pod_network_cidr }}
-scheduler: {}

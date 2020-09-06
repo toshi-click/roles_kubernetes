@@ -34,6 +34,7 @@
       - kubeadm
       - kubectl
       - docker-ce
+      - kubernetes-cni
 
 - name: hold packages
   dpkg_selections:
@@ -44,6 +45,7 @@
     - kubeadm
     - kubectl
     - docker-ce
+    - kubernetes-cni
 
 - name: add kernel parameters and reload
   sysctl:

@@ -90,56 +90,37 @@
   command: swapoff -a
   when: ansible_swaptotal_mb > 0
 
+- name: put /etc/default/kubelet
+  template:
+    src: kubelet
+    dest: /etc/default/kubelet
+    owner: root
+    group: root
+    mode: 0644
+  when: get_ipv4_address
+  notify: restart kubelet
+
+- name: get ipv4 address
+  command: bash -c "/sbin/ip -f inet -o addr show | grep {{ kubernetes_master_network }} | awk \{'print $4'\} | cut -d/ -f 1"
+  register: get_ipv4_address
+  check_mode: no
+  changed_when: false
+
+# kubernetesのインストールを確認する
+- name: Confirm installation of kubernetes
+  stat:
+    path: "/etc/kubernetes/admin.conf"
+  register: kubernetes_state
+
+- name: put /tmp/kubeadm-config.yml
+  template:
+    src: kubeadm-config.yml
+    dest: /tmp/kubeadm-config.yml
+    owner: root
+    group: root
+    mode: 0644
+
 - block:
-    - name: get ipv4 address
-      command: bash -c "/sbin/ip -f inet -o addr show | grep {{ kubernetes_virtualbox_network }} | awk \{'print $4'\} | cut -d/ -f 1"
-      register: get_ipv4_address
-      check_mode: no
-      changed_when: false
-
-    - name: put /etc/default/kubelet
-      template:
-        src: kubelet
-        dest: /etc/default/kubelet
-        owner: root
-        group: root
-        mode: 0644
-      when: get_ipv4_address
-      notify: restart kubelet
-  when: kubernetes_virtualbox_flag
-
-# masterノードの場合の処理
-- block:
-    - name: get ipv4 address
-      command: bash -c "/sbin/ip -f inet -o addr show | grep {{ kubernetes_master_network }} | awk \{'print $4'\} | cut -d/ -f 1"
-      register: get_ipv4_address
-      check_mode: no
-      changed_when: false
-
-    # kubernetesのインストールを確認する
-    - name: Confirm installation of kubernetes
-      stat:
-        path: "/etc/kubernetes/admin.conf"
-      register: kubernetes_state
-
-    - block:
-        - name: put /tmp/kubeadm-config.yml
-          template:
-            src: kubeadm-config.yml
-            dest: /tmp/kubeadm-config.yml
-            owner: root
-            group: root
-            mode: 0644
-
-        # kubeadm initの実行
-        - name: kubeadm init
-          shell: "bash -lc 'kubeadm init --config /tmp/kubeadm-config.yml'"
-          register: kubernetes_init_register
-          check_mode: no
-          changed_when: false
-
-      when: not kubernetes_state.stat.exists
-
     # rootユーザーがkubectlを実行できるようにする
     - name: "create directory /root/.kube"
       file:
@@ -177,14 +158,4 @@
         group: "{{ item }}"
       with_items:
         - "{{ kubernetes_execute_users }}"
-
-    # Masterノードにもデプロイしたい場合の対応
-    - name: kubernetes set master deploy set
-      shell: "bash -lc 'kubectl taint nodes {{ kubernetes_hostname }} node-role.kubernetes.io/master:NoSchedule-'"
-      check_mode: no
-      changed_when: false
-      when:
-        - kubernetes_master_deploy_flag
-      ignore_errors: yes
-
-  when: kubernetes_master_flag
+  when: kubernetes_state.stat.exists

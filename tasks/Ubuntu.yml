@@ -90,6 +90,12 @@
   command: swapoff -a
   when: ansible_swaptotal_mb > 0
 
+- name: get ipv4 address
+  command: bash -c "/sbin/ip -f inet -o addr show | grep {{ kubernetes_master_network }} | awk \{'print $4'\} | cut -d/ -f 1"
+  register: get_ipv4_address
+  check_mode: no
+  changed_when: false
+
 - name: put /etc/default/kubelet
   template:
     src: kubelet
@@ -97,14 +103,8 @@
     owner: root
     group: root
     mode: 0644
-  when: get_ipv4_address
   notify: restart kubelet
 
-- name: get ipv4 address
-  command: bash -c "/sbin/ip -f inet -o addr show | grep {{ kubernetes_master_network }} | awk \{'print $4'\} | cut -d/ -f 1"
-  register: get_ipv4_address
-  check_mode: no
-  changed_when: false
 
 # kubernetesのインストールを確認する
 - name: Confirm installation of kubernetes

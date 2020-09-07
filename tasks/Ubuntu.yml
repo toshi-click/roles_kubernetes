@@ -133,7 +133,7 @@
 
         # kubeadm initの実行
         - name: kubeadm init
-          shell: "bash -lc 'kubeadm init --ignore-preflight-errors  Swap --config /tmp/kubeadm-config.yml'"
+          shell: "bash -lc 'kubeadm init --config /tmp/kubeadm-config.yml'"
           register: kubernetes_init_register
           check_mode: no
           changed_when: false

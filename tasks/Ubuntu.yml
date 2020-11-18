@@ -105,7 +105,6 @@
     mode: 0644
   notify: restart kubelet
 
-
 # kubernetesのインストールを確認する
 - name: Confirm installation of kubernetes
   stat:
@@ -158,4 +157,6 @@
         group: "{{ item }}"
       with_items:
         - "{{ kubernetes_execute_users }}"
-  when: kubernetes_state.stat.exists
+  when:
+    - kubernetes_state.stat.exists
+    - kubernetes_master_flag
